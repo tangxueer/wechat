@@ -40,8 +40,6 @@ $jsonmenu = '{
                 "name":"本周作业",
                 "key":"homework"
             }]
-      
-
        },
        {
            "name":"休闲娱乐",
@@ -66,8 +64,20 @@ $jsonmenu = '{
                "name":"电视剧推荐",
                "key":"drama"
             }]
-       
-
+	   },
+	   {
+            "name":"关于鄙人",
+           "sub_button":[
+            {
+               "type":"click",
+               "name":"意见反馈",
+               "key":"advice"
+            },
+            {
+                "type":"click",
+                "name":"联系方式",
+                "key":"contact"
+            }]
        }]
  }';
 

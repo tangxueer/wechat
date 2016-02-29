@@ -1,8 +1,9 @@
 <?php
 define("TOKEN", "txe970731");
 
-$wechatObj = new wechatCallbackapiTest();
+$wechatObj = new wechatCallbackapiTest(0);
 if (!isset($_GET['echostr'])) {
+	$wechatObj->step();	
     $wechatObj->responseMsg();
 }else{
     $wechatObj->valid();
@@ -10,6 +11,13 @@ if (!isset($_GET['echostr'])) {
 
 class wechatCallbackapiTest
 {
+	public $step;
+	
+	function __construct($step)
+	{
+		$this->step=$step;
+	}
+	
     public function valid()
     {
         $echoStr = $_GET["echostr"];
@@ -18,6 +26,7 @@ class wechatCallbackapiTest
             exit;
         }
     }
+	
 
     private function checkSignature()
     {
@@ -44,35 +53,62 @@ class wechatCallbackapiTest
         if (!empty($postStr)){
             $postObj = simplexml_load_string($postStr, 'SimpleXMLElement', LIBXML_NOCDATA);
             $RX_TYPE = trim($postObj->MsgType);
-
             switch ($RX_TYPE)
             {
+                case "event":					
+					$resultStr = $this->receiveEvent($postObj);	
+					break;					
                 case "text":
-                   $resultStr = $this->receiveText($postObj);
-                   break;
-                case "event":
-                    $resultStr = $this->receiveEvent($postObj);
-                    break;
+					$resultStr = $this->receiveText($postObj);
+					break;								                
                 default:
                     $resultStr = "";
                     break;
             }
-            echo $resultStr;
+            echo $resultStr;	
+
         }else {
             echo "";
             exit;
         }
     }
 
-    private function receiveText($object)
+    public function receiveText($object)
     {
         $funcFlag = 0;
         $contentStr = "你发送的内容为：".$object->Content;
         $resultStr = $this->transmitText($object, $contentStr, $funcFlag);
         return $resultStr;
     }
+	
+	public function pdo()
+	{
+		require "./pdo_class.php";
+		$p=new mysql('wechat','advice');
+		return $p;
+	}
+	
+	public function receiveAdvice($object)//把反馈意见存入数据库
+	{
+		$advice = $object->Content;				
+		$p=$this->pdo();
+		$p->insert('advice','`id`,`adv`',"'','{$advice}'");  
+		
+        $funcFlag = 0;
+        $contentStr = "已收到您的反馈，谢谢支持~";
+        $resultStr = $this->transmitText($object, $contentStr, $funcFlag);
+        return $resultStr;		
+	}
+	
+	public function exit_000($object)
+	{
+		$funcFlag = 0;
+        $contentStr = "您将退出该功能!";
+        $resultStr = $this->transmitText($object, $contentStr, $funcFlag);
+        return $resultStr;
+	}
  
-    private function receiveEvent($object)
+    public function receiveEvent($object)
     {
 		$type = "";
         $contentStr = "";
@@ -101,13 +137,13 @@ class wechatCallbackapiTest
                         "Url" =>"http://378711563-picture.stor.sinaapp.com/timetable.png");
 						break;
 					case "homework":
-						$contentStr="暂无作业";
+						$contentStr = "暂无作业";
 						break;
 					case 'nba':
-						$contentStr=$this->nba();
+						$contentStr = $this->nba();
 						break;
 					case 'nba_tom':
-						$contentStr=$this->nba_tom();
+						$contentStr = $this->nba_tom();
 						break;
 					case "music":
 						$contentStr = array("Title" => "last of us",
@@ -122,6 +158,13 @@ class wechatCallbackapiTest
                         "PicUrl" =>"http://378711563-picture.stor.sinaapp.com/drama.jpg", 
                         "Url" =>"http://www.bilibili.com/video/av1594747/");
                         break;
+					case "advice":
+						$contentStr = "施工中。。。";//您将进行意见反馈，请输入您的意见！若不进行反馈，输入000退出。
+						$type="advice";
+						break;
+					case "contact":
+						$contentStr = "QQ:378711563 e-mail:378711563@qq.com 任何问题，欢迎叨唠！";
+						break;
 					default:
                         $contentStr[] = array("Title" =>"默认菜单回复", 
                         "Description" =>"贴心小助手", 
@@ -131,6 +174,7 @@ class wechatCallbackapiTest
                 }
                 break;
             default:
+				$this->step();
                 break;      
 
         }
@@ -143,12 +187,26 @@ class wechatCallbackapiTest
 				$resultStr = $this->transmitNews($object, $contentStr);
 			}          
         }else{
-            $resultStr = $this->transmitText($object, $contentStr);
+			if($type=="advice")
+			{
+				$this->step();
+				$resultStr = $this->transmitText($object, $contentStr);				
+			}else
+			{
+				$resultStr = $this->transmitText($object, $contentStr);
+			}
+            
         }
         return $resultStr;
     }
 
-    private function transmitText($object, $content, $funcFlag = 0)
+	public function step()
+	{
+		global $step;
+		$step=1;
+	}
+	
+    public function transmitText($object, $content, $funcFlag = 0)
     {
         $textTpl = "<xml>
 					<ToUserName><![CDATA[%s]]></ToUserName>
@@ -162,7 +220,7 @@ class wechatCallbackapiTest
         return $resultStr;
     }
 
-    private function transmitNews($object, $arr_item, $funcFlag = 0)
+    public function transmitNews($object, $arr_item, $funcFlag = 0)
     {
         if(!is_array($arr_item))
             return;
@@ -193,7 +251,7 @@ class wechatCallbackapiTest
         return $resultStr;
     }
 	
-	private function transmitMusic($object, $item, $funcFlag = 0)
+	public function transmitMusic($object, $item, $funcFlag = 0)
     {
         if(!is_array($item))
             return;
@@ -218,28 +276,8 @@ class wechatCallbackapiTest
         $resultStr = sprintf($newsTpl, $object->FromUserName, $object->ToUserName, time(), $funcFlag);
         return $resultStr;
     }
-/*	
-	private function transmitMusic($object,$content,$funcFlag = 0)
-    {
-		$musicTpl = "<xml>
-					<ToUserName><![CDATA[%s]]></ToUserName>
-					<FromUserName><![CDATA[%s]]></FromUserName>
-					<CreateTime>%s</CreateTime>
-					<MsgType><![CDATA[music]]></MsgType>
-					<Music>
-					<Title><![CDATA[%s]]></Title>
-					<Description><![CDATA[%s]]></Description>
-					<MusicUrl><![CDATA[%s]]></MusicUrl>
-					<HQMusicUrl><![CDATA[%s]]></HQMusicUrl>
-					<ThumbMediaId><![CDATA[%s]]></ThumbMediaId>
-					</Music>
-					<FuncFlag>%s</FuncFlag>
-					</xml>";
-        $resultStr = sprintf($musicTpl, $object->FromUserName, $object->ToUserName,time(),$content['Title'],$content['Description'],$content['MusicUrl'],$funcFlag);
-        return $resultStr;
-    }
-*/	
-	function forecast()
+
+	public function forecast()
 	{
 		function compress_html($string) {  
 			$string = str_replace("\r\n", '', $string);   
@@ -269,26 +307,22 @@ class wechatCallbackapiTest
 		$page_content=file_get_contents($url); 
 		$page_content=compress_html($page_content);
 		preg_match("/\"t clearfix\"(.*?)后天/",$page_content,$result);
-		preg_match("/今天(.*?)slid/",$result[1],$today);
+		preg_match("/\"hidden_title\"(.*?>)/",$page_content,$today);
 		preg_match("/明天(.*?)slid/",$result[1],$tomo);
 		preg_match("/后天(.*?)slid/",$page_content,$tdat);
 
 		/*今天*/
+		$a=explode(" ",$today[1]);
 
-		$a=explode("<",$today[1]);
 		//气候
-		$b=explode(">",$a[6]);
-		$weather=$b[1];
+		$weather=$a[2];
 		//最高温度
-		$d=explode(">",$a[9]);
-		$max_tem=$d[1];
+		$b=explode("/",$a[3]);
+		$c=explode("°C",$b[1]);	
+		$max_tem=$c[0];
 		//最低温度
-		$e=explode(">",$a[11]);
-		$min_tem=$e[1];
-		//风速
-		$f=explode(">",$a[21]);
-		$wind=$f[1];
-
+		$min_tem=$b[0];
+		
 
 		/*明天*/
 
@@ -360,18 +394,18 @@ class wechatCallbackapiTest
 		
 		
 		$con[]=array("Title" =>"广州天气预报");
-		$con[]=array("Title" =>"今天 天气:".$weather." 温度:".$max_tem."℃-".$min_tem." 风速:".$wind,
+		$con[]=array("Title" =>"今天 天气:".$weather." 温度:".$max_tem."-".$min_tem."℃",
 		"PicUrl" =>$picurl);
-		$con[]=array("Title" =>"明天 天气:".$weather1." 温度:".$max_tem1."℃-".$min_tem1." 风速:".$wind1,
+		$con[]=array("Title" =>"明天 天气:".$weather1." 温度:".$max_tem1."-".$min_tem1." 风速:".$wind1,
 		"PicUrl" =>$picurl1);
-		$con[]=array("Title" =>"后天 天气:".$weather2." 温度:".$max_tem2."℃-".$min_tem2." 风速:".$wind2,
+		$con[]=array("Title" =>"后天 天气:".$weather2." 温度:".$max_tem2."-".$min_tem2." 风速:".$wind2,
 		"PicUrl" =>$picurl2);             
 
 		return $con;
 
 	}
 		
-	function nba()
+	public function nba()
 	{
 		function compress_html($string) {  
 			$string = str_replace("\r\n", '', $string);   
@@ -460,7 +494,7 @@ class wechatCallbackapiTest
 		return $res;		
 	}
 	
-	function nba_tom()
+	public function nba_tom()
 	{
 		function compress_html($string) {  
 			$string = str_replace("\r\n", '', $string);   
