@@ -46,29 +46,33 @@ class wechatCallbackapiTest
             $postObj = simplexml_load_string($postStr, 'SimpleXMLElement', LIBXML_NOCDATA);
             $RX_TYPE = trim($postObj->MsgType);
             switch ($RX_TYPE)
-            {
+            {				
                 case "event":					
 					$resultStr = $this->receiveEvent($postObj);	
 					break;					
                 case "text":
-					$step=$this->checkStep($postObj);
-					switch ($step)
+					$arr=$this->checkStep($postObj->FromUserName);
+					switch ($arr['step'])
 					{
-						case 1:
-							if($postObj->Content=="000")
-							{
-								$resultStr = $this->exitStep($postObj);
+						case 'adv':
+							if(trim($postObj->Content)=="000")
+							{								
+								$contentStr = "您将退出该功能!";
+								$resultStr = $this->transmitText($postObj, $contentStr, $funcFlag = 0);
+								$this->exitStep($postObj->FromUserName);
 							}else
 							{
-								$resultStr = $this->saveAdvice($postObj);
+								$contentStr = "已收到您的反馈，谢谢支持~";
+								$resultStr = $this->transmitText($postObj, $contentStr, $funcFlag = 0);
+								$this->saveAdvice($postObj->FromUserName,trim($postObj->Content));
 							}							
 							break;
-						case 0:
+						case 'sub':
 							$resultStr = $this->receiveText($postObj);
 							break;
 						default:
 							break;
-					}					
+					}				
 					break;								                
                 default:
                     $resultStr = "";
@@ -81,78 +85,59 @@ class wechatCallbackapiTest
             exit;
         }
     }
-
+	
 	/*数据库操作*/
-	public function dbConnect_adv()
+	
+	public function dbConnect()
     {
-		include ("pdo_class.php");
-		$db_adv=new mysql('advice');
-		return $db_adv;		
+		$db = new PDO("mysql:host=".SAE_MYSQL_HOST_M.";port=".SAE_MYSQL_PORT.";dbname=".SAE_MYSQL_DB, SAE_MYSQL_USER, SAE_MYSQL_PASS);
+		$db -> query("SET NAMES 'UTF8'");
+		return $db;		
     } 
 
-	public function saveAdvice($object)//把反馈意见存入数据库
-	{			
-	
-	    $db_adv=$this->dbConnect_adv();
-        $db_adv->insert('advice','`aid`,`name`,`adv`',"'','{$object->FromUserName}','{$object->Content}'"); 
-				
-        $funcFlag = 0;
-        $contentStr = "已收到您的反馈，谢谢支持~";
-        $resultStr = $this->transmitText($object, $contentStr, $funcFlag);
-        return $resultStr;		
-	}
 
-	
-	public function dbConnect_ope()
-    {
-		include ("pdo_class.php");
-		$db_ope=new mysql('operation');
-		return $db_ope;		
-    } 
-	
-	public function subscribe($object)//添加关注后记录用户
-	{
-		$db_ope=$this->dbConnect_ope();
-		$db_ope->insert('operation','`sid`,`name`,`step`',"'','{$object->FromUserName}','0'"); 
+	public function saveAdvice($NAME,$ADV)//把反馈意见存入数据库
+	{				
+	    $db=$this->dbConnect();
+        $sql="insert into advice (aid,fromusername,advice) values ('','$NAME','$ADV')";
+		$db->query($sql);	
 	}
 	
-	public function saveStep($object)//记录步骤，进入意见反馈功能
+	public function subscribe($NAME)//添加关注后记录用户
 	{
-		$db_ope=$this->dbConnect_ope();
-		$db_ope->update('operation',"`step`='1'","name='{$object->FromUserName}'");//step=1表示进入意见反馈功能 
+		$db=$this->dbConnect();
+		$sql="insert into operation (sid,fromusername,step) values ('','$NAME','sub')";
+		$db->query($sql);		
 	}
 	
-	public function checkStep($object)//检查步骤，是否进入意见反馈功能，即step是否为1
+	public function saveStep($NAME)//记录步骤，进入意见反馈功能
 	{
-		$db_ope=$this->dbConnect_ope();
-		$db_ope->prepare_select('*','operation',"`name`=?");
-		$db_ope->setFetchMode_assoc();
-		$db_ope->casenatural();
-		$db_ope->bindParam(1,'{$object->FromUserName}');
-		$db_ope->execute();
-		$arr=$db_ope->fetch();	
-		$res=$arr['step'];
-		return $res;
-
+		$db=$this->dbConnect();
+		$sql="update operation set step='adv' where fromusername='$NAME'";
+		$db->query($sql);
 	}
 	
-	public function exitStep($object)//000退出意见反馈功能
+	public function checkStep($NAME)//检查步骤，是否进入意见反馈功能
 	{
-		$db=$this->dbConnect_ope();
-		$db->update('operation',"`step`='0'","name='{$object->FromUserName}'");	
-		
-		$funcFlag = 0;
-        $contentStr = "您将退出该功能!";
-        $resultStr = $this->transmitText($object, $contentStr, $funcFlag);
-        return $resultStr;		
+		$db=$this->dbConnect();
+		$sql="select * from operation where fromusername='$NAME' limit 1";
+		$res=$db->query($sql);
+		$arr=$res->fetch();
+		return $arr;
+	}
+	
+	public function exitStep($NAME)//000退出意见反馈功能
+	{
+		$db=$this->dbConnect();
+		$sql="update operation set step='sub' where fromusername='$NAME'";
+		$db->query($sql);		
 	}
  
 	
     public function receiveText($object)
     {
-        $funcFlag = 0;
-        $contentStr = "你发送的内容为：".$object->Content;
-        $resultStr = $this->transmitText($object, $contentStr, $funcFlag);
+        $contentStr = "无效信息哟~";
+        $resultStr = $this->transmitText($object, $contentStr, $funcFlag=0);
         return $resultStr;
     }
 	
@@ -165,7 +150,7 @@ class wechatCallbackapiTest
         {
             case "subscribe":
                 $contentStr = "欢迎关注贴心小助手！";
-				$this->subscribe($object);
+				$this->subscribe($object->FromUserName);
 				break;
             case "unsubscribe":
                 break;
@@ -214,19 +199,10 @@ class wechatCallbackapiTest
 						$type="advice";
 						break;
 					case "contact":
-						$contentStr = "QQ:378711563 e-mail:378711563@qq.com 任何问题，欢迎叨唠！";
+						$contentStr = "QQ:378711563 e-mail:378711563@qq.com 任何问题，欢迎叨扰！";
 						break;
-					default:
-                        $contentStr[] = array("Title" =>"默认菜单回复", 
-                        "Description" =>"贴心小助手", 
-                        "PicUrl" =>"http://discuz.comli.com/weixin/weather/icon/cartoon.jpg", 
-                        "Url" =>"weixin://addfriend/pondbaystudio");
-                        break;
                 }
                 break;
-            default:
-                break;      
-
         }
         if (is_array($contentStr)){
 			if($type=="music")
@@ -239,7 +215,7 @@ class wechatCallbackapiTest
         }else{
 			if($type=="advice")
 			{
-				$this->saveStep($object);
+				$this->saveStep($object->FromUserName);
 				$resultStr = $this->transmitText($object, $contentStr);				
 			}else
 			{
