@@ -44,6 +44,11 @@ $jsonmenu = '{
        {
            "name":"休闲娱乐",
            "sub_button":[
+			{
+               "type":"click",
+               "name":"微信墙",
+               "key":"wall"
+            },
             {
                "type":"click",
                "name":"nba今日赛程",

@@ -49,7 +49,27 @@ class wechatCallbackapiTest
             {				
                 case "event":					
 					$resultStr = $this->receiveEvent($postObj);	
-					break;					
+					break;	
+				case "image":			
+					$arr_wall=$this->checkstep_wall($postObj->FromUserName);
+					switch($arr_wall['step'])
+					{
+						case "uploadimage":							
+							$contentStr = "您现在可以上墙了，请回复想要上墙的内容。";
+							$resultStr = $this->transmitText($postObj,$contentStr,$funcFlag=0);
+							
+							$this->saveImage($postObj->FromUserName,$postObj->PicUrl);
+							
+							$this->saveStep_wall($postObj->FromUserName,'onthewall');
+							break;
+						case "onthewall":
+							$contentStr="发送成功！<a href=\"http://1.378711563.applinzi.com/wall.php/\">进入网页微信墙</a>再次发送请直接回复，若要退出微信墙功能请输入000。";
+							$resultStr = $this->transmitText($postObj,$contentStr,$funcFlag=0);
+										
+							$this->messageImage($postObj->FromUserName,$postObj->PicUrl);										
+							break;
+					}
+					break;
                 case "text":
 					$arr=$this->checkStep($postObj->FromUserName);
 					switch ($arr['step'])
@@ -59,13 +79,48 @@ class wechatCallbackapiTest
 							{								
 								$contentStr = "您将退出该功能!";
 								$resultStr = $this->transmitText($postObj, $contentStr, $funcFlag = 0);
+								
 								$this->exitStep($postObj->FromUserName);
 							}else
 							{
 								$contentStr = "已收到您的反馈，谢谢支持~";
 								$resultStr = $this->transmitText($postObj, $contentStr, $funcFlag = 0);
+								
 								$this->saveAdvice($postObj->FromUserName,trim($postObj->Content));
 							}							
+							break;
+						case 'wall':																																			
+							$arr_wall=$this->checkstep_wall($postObj->FromUserName);							
+							switch($arr_wall['step'])
+							{
+								case "createname":																			
+									$contentStr = "请回复图片作为您的头像。";
+									$resultStr = $this->transmitText($postObj,$contentStr,$funcFlag=0);
+									
+									$this->saveNickname($postObj->FromUserName,trim($postObj->Content));
+									
+									$this->saveStep_wall($postObj->FromUserName,'uploadimage');
+									break;			
+								case "onthewall":
+									if(trim($postObj->Content)!="000")
+									{
+										$contentStr="发送成功！<a href=\"http://1.378711563.applinzi.com/wall.php/\">进入网页微信墙</a>再次发送请直接回复，若要退出微信墙功能请输入000。";
+										$resultStr = $this->transmitText($postObj,$contentStr,$funcFlag=0);
+										
+										$this->messageText($postObj->FromUserName,trim($postObj->Content));
+									}else
+									{
+										$contentStr = "您将退出该功能!";
+										$resultStr = $this->transmitText($postObj, $contentStr, $funcFlag = 0);
+										
+										$this->saveStep_wall($postObj->FromUserName,'createname');
+										
+										$this->exitStep($postObj->FromUserName);
+										
+										$this->deleteName($postObj->FromUserName);
+									}									
+									break;
+							}		
 							break;
 						case 'sub':
 							$resultStr = $this->receiveText($postObj);
@@ -73,7 +128,8 @@ class wechatCallbackapiTest
 						default:
 							break;
 					}				
-					break;								                
+					break;		
+				
                 default:
                     $resultStr = "";
                     break;
@@ -86,8 +142,9 @@ class wechatCallbackapiTest
         }
     }
 	
-	/*数据库操作*/
+/*数据库操作*/
 	
+	/*意见反馈功能*/
 	public function dbConnect()
     {
 		$db = new PDO("mysql:host=".SAE_MYSQL_HOST_M.";port=".SAE_MYSQL_PORT.";dbname=".SAE_MYSQL_DB, SAE_MYSQL_USER, SAE_MYSQL_PASS);
@@ -103,20 +160,20 @@ class wechatCallbackapiTest
 		$db->query($sql);	
 	}
 	
-	public function subscribe($NAME)//添加关注后记录用户
+	public function subscribe($NAME)//添加关注后记录用户，$step初始值为sub
 	{
 		$db=$this->dbConnect();
 		$sql="insert into operation (sid,fromusername,step) values ('','$NAME','sub')";
 		$db->query($sql);		
 	}
 	
-	public function saveStep($NAME)//记录步骤，进入意见反馈功能
+	public function saveStep($NAME,$STEP)//记录步骤,$STEP=adv/wall
 	{
 		$db=$this->dbConnect();
-		$sql="update operation set step='adv' where fromusername='$NAME'";
+		$sql="update operation set step='$STEP' where fromusername='$NAME'";
 		$db->query($sql);
-	}
-	
+	}	
+
 	public function checkStep($NAME)//检查步骤，是否进入意见反馈功能
 	{
 		$db=$this->dbConnect();
@@ -125,14 +182,78 @@ class wechatCallbackapiTest
 		$arr=$res->fetch();
 		return $arr;
 	}
-	
-	public function exitStep($NAME)//000退出意见反馈功能
+		
+	public function exitStep($NAME)//000退出,置step为sub
 	{
 		$db=$this->dbConnect();
 		$sql="update operation set step='sub' where fromusername='$NAME'";
 		$db->query($sql);		
 	}
  
+	
+	
+	/*微信墙功能*/
+	public function createwall($NAME)//$step初始值为createname
+	{
+		$db=$this->dbConnect();
+		$sql="insert into wall (wid,fromusername,date,nickname,picurl,step) values ('','$NAME',NOW(),'','','createname')";
+		$db->query($sql);		
+	}		
+
+	public function saveStep_wall($NAME,$STEP)//记录步骤,$STEP=createname/uploadphoto/onthewall
+	{
+		$db=$this->dbConnect();
+		$sql="update wall set step='$STEP' where fromusername='$NAME'";
+		$db->query($sql);
+	}
+	
+	public function checkStep_wall($NAME)//检查步骤
+	{
+		$db=$this->dbConnect();
+		$sql="select * from wall where fromusername='$NAME' limit 1";
+		$res=$db->query($sql);
+		$arr=$res->fetch();
+		return $arr;
+	}
+
+	public function saveNickname($NAME,$NICKNAME)
+	{
+		$db=$this->dbConnect();
+		$sql="update wall set nickname='$NICKNAME' where fromusername='$NAME'";
+		$db->query($sql);		
+	}
+	
+	public function saveImage($NAME,$IMAGE)
+	{
+		$db=$this->dbConnect();
+		$sql="update wall set picurl='$IMAGE' where fromusername='$NAME'";
+		$db->query($sql);		
+	}
+	
+	public function messageText($NAME,$MESSAGE)
+	{
+		$db=$this->dbConnect();
+		$sql="insert into message (mid,fromusername,date,text,picurl) values ('','$NAME',NOW(),'$MESSAGE','')";
+		$db->query($sql);		
+	}
+	
+	public function messageImage($NAME,$MESSAGE)
+	{
+		$db=$this->dbConnect();
+		$sql="insert into message (mid,fromusername,date,text,picurl) values ('','$NAME',NOW(),'','$MESSAGE')";
+		$db->query($sql);		
+	}
+	
+	public function deleteName($NAME)
+	{
+		$db=$this->dbConnect();
+		$sql="delete from wall where fromusername='$NAME'";
+		$db->query($sql);
+	}
+
+		
+/*数据库结束*/
+	
 	
     public function receiveText($object)
     {
@@ -175,6 +296,10 @@ class wechatCallbackapiTest
 					case "homework":
 						$contentStr = "暂无作业";
 						break;
+					case "wall":
+						$contentStr = "欢迎进入微信墙功能,请回复您所要使用的昵称。";
+						$type="wall";
+						break;
 					case 'nba':
 						$contentStr = $this->nba();
 						break;
@@ -183,16 +308,16 @@ class wechatCallbackapiTest
 						break;
 					case "music":
 						$contentStr = array("Title" => "last of us",
-						"Description" => "游戏美国末日的插曲",
+						"Description" => "游戏 美国末日(又名最后生还者) 插曲",
 						"MusicUrl" => "http://378711563-music.stor.sinaapp.com/music.mp3",
 						"HQMusicUrl" => "http://378711563-music.stor.sinaapp.com/music.mp3");						
 						$type="music";				
 						break;
 					case "drama":
-						$contentStr[] = array("Title" =>"电视剧红色 良心国产", 
-                        "Description" =>"豆瓣高分9.3，福尔摩斯般的探案，花样年华般的爱情,(点击跳转B站链接)", 
-                        "PicUrl" =>"http://378711563-picture.stor.sinaapp.com/drama.jpg", 
-                        "Url" =>"http://www.bilibili.com/video/av1594747/");
+						$contentStr[] = array("Title" =>"BBC电视剧 神探夏洛克", 
+                        "Description" =>"大英腐国三集片 主演：Benedict Cumberbatch & Martin Freeman (点击跳转B站链接)", 
+                        "PicUrl" =>"http://378711563-picture.stor.sinaapp.com/sherlock.jpg", 
+                        "Url" =>"http://www.bilibili.com/video/av722138/");
                         break;
 					case "advice":
 						$contentStr = "您将进行意见反馈，请输入您的意见！若不进行反馈，输入000退出。";
@@ -215,12 +340,22 @@ class wechatCallbackapiTest
         }else{
 			if($type=="advice")
 			{
-				$this->saveStep($object->FromUserName);
+				$this->saveStep($object->FromUserName,'adv');
 				$resultStr = $this->transmitText($object, $contentStr);				
 			}else
 			{
-				$resultStr = $this->transmitText($object, $contentStr);
+				if($type=="wall")
+				{					
+					$this->saveStep($object->FromUserName,'wall');
+					$this->createwall($object->FromUserName);
+					$resultStr = $this->transmitText($object, $contentStr);	
+				}else
+				{
+					$resultStr = $this->transmitText($object, $contentStr);
+				}
+				
 			}
+			
             
         }
         return $resultStr;
