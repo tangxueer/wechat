@@ -34,11 +34,6 @@ $jsonmenu = '{
                "type":"view",
                "name":"教务管理系统",
                "url":"http://www.scut.edu.cn/jw2005/"
-            },
-            {
-                "type":"click",
-                "name":"本周作业",
-                "key":"homework"
             }]
        },
        {
