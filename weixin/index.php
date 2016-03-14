@@ -237,7 +237,8 @@ class wechatCallbackapiTest
 		$res = $db->query($sql_w);
 		$arr = $res->fetch();
 		$nickname = $arr['nickname'];
-		$sql_m = "insert into message (mid,fromusername,date,nickname,text,picurl) values ('','$NAME',NOW(),'$nickname','$MESSAGE','')";
+		$picurl = $arr['picurl'];
+		$sql_m = "insert into message (mid,fromusername,date,nickname,picurl,text,picture) values ('','$NAME',NOW(),'$nickname','$picurl','$MESSAGE','')";
 		$db -> query($sql_m);		
 	}
 	
@@ -248,8 +249,9 @@ class wechatCallbackapiTest
 		$res = $db->query($sql_w);
 		$arr = $res->fetch();
 		$nickname = $arr['nickname'];
-		$sql_m = "insert into message (mid,fromusername,date,nickname,text,picurl) values ('','$NAME',NOW(),'$nickname','','$MESSAGE')";
-		$db -> query($sql_m);		
+		$picurl = $arr['picurl'];
+		$sql_m = "insert into message (mid,fromusername,date,nickname,picurl,text,picture) values ('','$NAME',NOW(),'$nickname','$picurl','','$MESSAGE')";
+		$db -> query($sql_m);	
 	}
 	
 	public function deleteName($NAME)
@@ -285,7 +287,7 @@ class wechatCallbackapiTest
         switch ($object->Event)
         {
             case "subscribe":
-                $contentStr = "欢迎关注贴心小助手！";
+                $contentStr = "欢迎关注o(^▽^)o！";
 				$this->subscribe($object->FromUserName);
 				break;
             case "unsubscribe":
@@ -307,9 +309,6 @@ class wechatCallbackapiTest
                         "Description" =>"点击查看大图", 
                         "PicUrl" =>"http://378711563-picture.stor.sinaapp.com/timetable.png", 
                         "Url" =>"http://378711563-picture.stor.sinaapp.com/timetable.png");
-						break;
-					case "homework":
-						$contentStr = "暂无作业";
 						break;
 					case "wall":
 						$contentStr = "欢迎进入微信墙功能,请回复您所要使用的昵称。";

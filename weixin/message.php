@@ -42,18 +42,13 @@ $wxResult=$db->query($wxQuery);
 
 while ($wxRow=$wxResult->fetch()) {
 	$recordID = $wxRow[0];
-	$content = $wxRow[3];
-	$picture = $wxRow[4];
 	$fromusername = $wxRow[1];
-	
-	$wxQuery_w="select * from wall where fromusername='{$fromusername}'";
-	$wxResult_w=$db->query($wxQuery_w);
-	$wxRow_w=$wxResult_w->fetch();
-    
-	$nickname = $wxRow_w[3];
-    $picurl = $wxRow_w[4];
-	$picurl=substr_replace($picurl,"logo",14,3);
-    //$xml=$content;
+	$nickname = $wxRow[3];
+	$picurl = $wxRow[4];
+	$content = $wxRow[5];
+	$picture = $wxRow[6];
+		     
+	$picurl = substr_replace($picurl,"logo",14,3);
 	$content = $nickname." : ".$content;
 	
 	if(empty($picture))
