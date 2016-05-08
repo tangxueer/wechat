@@ -1,27 +1,19 @@
 <?php
-define("TOKEN", "txe970731");
-
-$wechatObj = new wechatCallbackapiTest(0);
+define("TOKEN", "tangxueer");
+$wechatObj = new wechatCallbackapiTest();
 if (!isset($_GET['echostr'])) {
-	$wechatObj->step();	
-    $wechatObj->responseMsg();
+    $wechatObj -> responseMsg();
 }else{
-    $wechatObj->valid();
+    $wechatObj -> valid();
 }
 
 class wechatCallbackapiTest
 {
-	public $step;
-	
-	function __construct($step)
-	{
-		$this->step=$step;
-	}
 	
     public function valid()
     {
         $echoStr = $_GET["echostr"];
-        if($this->checkSignature()){
+        if($this -> checkSignature()){
             echo $echoStr;
             exit;
         }
@@ -54,13 +46,90 @@ class wechatCallbackapiTest
             $postObj = simplexml_load_string($postStr, 'SimpleXMLElement', LIBXML_NOCDATA);
             $RX_TYPE = trim($postObj->MsgType);
             switch ($RX_TYPE)
-            {
+            {				
                 case "event":					
 					$resultStr = $this->receiveEvent($postObj);	
-					break;					
+					break;	
+				case "image":			
+					$arr_wall = $this->checkstep_wall($postObj->FromUserName);
+					switch($arr_wall['step'])
+					{
+						case "uploadimage":							
+							$contentStr = "您现在可以上墙了，请回复想要上墙的内容。";
+							$resultStr = $this->transmitText($postObj,$contentStr,$funcFlag=0);
+							
+							$this->saveImage($postObj->FromUserName,$postObj->PicUrl);
+							
+							$this->saveStep_wall($postObj->FromUserName,'onthewall');
+							break;
+						case "onthewall":
+							$contentStr = "发送成功！<a href = \"http://tangxueer.duapp.com/wall.php\">进入网页微信墙</a>再次发送请直接回复，若要退出微信墙功能请输入0。";
+							$resultStr = $this->transmitText($postObj,$contentStr,$funcFlag=0);
+										
+							$this->messageImage($postObj->FromUserName,$postObj->PicUrl);										
+							break;
+					}
+					break;
                 case "text":
-					$resultStr = $this->receiveText($postObj);
-					break;								                
+					$arr = $this->checkStep($postObj->FromUserName);
+					switch ($arr['step'])
+					{
+						case 'adv':
+							if(trim($postObj->Content) == "0")
+							{								
+								$contentStr = "您将退出该功能!";
+								$resultStr = $this->transmitText($postObj, $contentStr, $funcFlag = 0);
+								
+								$this->exitStep($postObj->FromUserName);
+							}else
+							{
+								$contentStr = "已收到您的反馈，谢谢支持~";
+								$resultStr = $this->transmitText($postObj, $contentStr, $funcFlag = 0);
+								
+								$this->saveAdvice($postObj->FromUserName,trim($postObj->Content));
+							}							
+							break;
+						case 'wall':																																			
+							$arr_wall = $this->checkstep_wall($postObj->FromUserName);							
+							switch($arr_wall['step'])
+							{
+								case "createname":																			
+									$contentStr = "请回复图片作为您的头像。";
+									$resultStr = $this->transmitText($postObj,$contentStr,$funcFlag=0);
+									
+									$this->saveNickname($postObj->FromUserName,trim($postObj->Content));
+									
+									$this->saveStep_wall($postObj->FromUserName,'uploadimage');
+									break;			
+								case "onthewall":
+									if(trim($postObj->Content) != "0")
+									{
+										$contentStr = "发送成功！<a href = \"http://tangxueer.duapp.com/wall.php\">进入网页微信墙</a>再次发送请直接回复，若要退出微信墙功能请输入0。";
+										$resultStr = $this->transmitText($postObj,$contentStr,$funcFlag=0);
+										
+										$this->messageText($postObj->FromUserName,trim($postObj->Content));
+									}else
+									{
+										$contentStr = "您将退出该功能!";
+										$resultStr = $this->transmitText($postObj, $contentStr, $funcFlag = 0);
+										
+										$this->saveStep_wall($postObj->FromUserName,'createname');
+										
+										$this->exitStep($postObj->FromUserName);
+										
+										$this->deleteName($postObj->FromUserName);																				
+									}									
+									break;
+							}		
+							break;
+						case 'sub':
+							$resultStr = $this->receiveText($postObj);
+							break;
+						default:
+							break;
+					}				
+					break;		
+				
                 default:
                     $resultStr = "";
                     break;
@@ -72,42 +141,144 @@ class wechatCallbackapiTest
             exit;
         }
     }
+	
+/*数据库操作*/
+	
+	public function dbConnect()
+    {
+		$db = new PDO("mysql:host=sqld.duapp.com;port=4050;dbname=MrTkUtxTXZQQyVBUGHfn","2327bf2f2eed4da7aaae50a91f246f4d","75f45c5d72a54d8ba3ae31fe4c2be16d");
+		$db -> query("SET NAMES 'UTF8'");
+		return $db;		
+    } 
 
+	/*意见反馈功能*/
+	public function saveAdvice($NAME,$ADV)//把反馈意见存入数据库
+	{				
+	    $db = $this->dbConnect();
+        $sql = "insert into advice (aid,fromusername,advice) values ('','$NAME','$ADV')";
+		$db -> query($sql);	
+	}
+	
+	public function subscribe($NAME)//添加关注后记录用户，$step初始值为sub
+	{
+		$db = $this->dbConnect();
+		$sql = "insert into operation (sid,fromusername,step) values ('','$NAME','sub')";
+		$db -> query($sql);		
+	}
+	
+	public function saveStep($NAME,$STEP)//记录步骤,$STEP=adv/wall
+	{
+		$db = $this->dbConnect();
+		$sql = "update operation set step = '$STEP' where fromusername='$NAME'";
+		$db -> query($sql);
+	}	
+
+	public function checkStep($NAME)//检查步骤，是否进入意见反馈功能
+	{
+		$db = $this->dbConnect();
+		$sql = "select * from operation where fromusername = '$NAME' limit 1";
+		$res = $db->query($sql);
+		$arr = $res->fetch();
+		return $arr;
+	}
+		
+	public function exitStep($NAME)//000退出,置step为sub
+	{
+		$db = $this->dbConnect();
+		$sql = "update operation set step = 'sub' where fromusername = '$NAME'";
+		$db -> query($sql);		
+	}
+ 
+	
+	
+	/*微信墙功能*/
+	public function createwall($NAME)//$step初始值为createname
+	{
+		$db = $this->dbConnect();
+		$sql = "insert into wall (wid,fromusername,date,nickname,picurl,step) values ('','$NAME',NOW(),'','','createname')";
+		$db -> query($sql);		
+	}		
+
+	public function saveStep_wall($NAME,$STEP)//记录步骤,$STEP=createname/uploadphoto/onthewall
+	{
+		$db = $this->dbConnect();
+		$sql = "update wall set step = '$STEP' where fromusername = '$NAME'";
+		$db -> query($sql);
+	}
+	
+	public function checkStep_wall($NAME)//检查步骤
+	{
+		$db = $this->dbConnect();
+		$sql = "select * from wall where fromusername = '$NAME' limit 1";
+		$res = $db->query($sql);
+		$arr = $res->fetch();
+		return $arr;
+	}
+
+	public function saveNickname($NAME,$NICKNAME)
+	{
+		$db = $this->dbConnect();
+		$sql = "update wall set nickname = '$NICKNAME' where fromusername = '$NAME'";
+		$db -> query($sql);		
+	}
+	
+	public function saveImage($NAME,$IMAGE)
+	{
+		$db = $this->dbConnect();
+		$sql = "update wall set picurl = '$IMAGE' where fromusername = '$NAME'";
+		$db -> query($sql);		
+	}
+	
+	public function messageText($NAME,$MESSAGE)
+	{
+		$db = $this->dbConnect();
+		$sql_w = "select * from wall where fromusername = '$NAME' limit 1";
+		$res = $db->query($sql_w);
+		$arr = $res->fetch();
+		$nickname = $arr['nickname'];
+		$picurl = $arr['picurl']."/";
+		$sql_m = "insert into message (mid,fromusername,date,nickname,picurl,text,picture) values ('','$NAME',NOW(),'$nickname','$picurl','$MESSAGE','')";
+		$db -> query($sql_m);		
+	}
+	
+	public function messageImage($NAME,$MESSAGE)
+	{
+		$db = $this->dbConnect();
+		$sql_w = "select * from wall where fromusername = '$NAME' limit 1";
+		$res = $db->query($sql_w);
+		$arr = $res->fetch();
+		$nickname = $arr['nickname'];
+		$picurl = $arr['picurl']."/";
+		$sql_m = "insert into message (mid,fromusername,date,nickname,picurl,text,picture) values ('','$NAME',NOW(),'$nickname','$picurl','','$MESSAGE')";
+		$db -> query($sql_m);	
+	}
+	
+	public function deleteName($NAME)
+	{
+		$db = $this->dbConnect();
+		$sql = "delete from wall where fromusername = '$NAME'";
+		$db -> query($sql);
+	}
+	
+	public function deleteMessage($NAME)
+	{
+		$db = $this->dbConnect();
+		$sql = "delete from message where fromusername = '$NAME'";
+		$db -> query($sql);
+	}
+
+		
+/*数据库结束*/
+	
+	
     public function receiveText($object)
     {
-        $funcFlag = 0;
-        $contentStr = "你发送的内容为：".$object->Content;
-        $resultStr = $this->transmitText($object, $contentStr, $funcFlag);
+        $contentStr = "无效信息哟~";
+        $resultStr = $this->transmitText($object, $contentStr, $funcFlag=0);
         return $resultStr;
     }
 	
-	public function pdo()
-	{
-		require "./pdo_class.php";
-		$p=new mysql('wechat','advice');
-		return $p;
-	}
 	
-	public function receiveAdvice($object)//把反馈意见存入数据库
-	{
-		$advice = $object->Content;				
-		$p=$this->pdo();
-		$p->insert('advice','`id`,`adv`',"'','{$advice}'");  
-		
-        $funcFlag = 0;
-        $contentStr = "已收到您的反馈，谢谢支持~";
-        $resultStr = $this->transmitText($object, $contentStr, $funcFlag);
-        return $resultStr;		
-	}
-	
-	public function exit_000($object)
-	{
-		$funcFlag = 0;
-        $contentStr = "您将退出该功能!";
-        $resultStr = $this->transmitText($object, $contentStr, $funcFlag);
-        return $resultStr;
-	}
- 
     public function receiveEvent($object)
     {
 		$type = "";
@@ -115,29 +286,32 @@ class wechatCallbackapiTest
         switch ($object->Event)
         {
             case "subscribe":
-                $contentStr = "欢迎关注贴心小助手！";
+                $contentStr = "欢迎关注o(^▽^)o！";
+				$this->subscribe($object->FromUserName);
+				break;
             case "unsubscribe":
                 break;
             case "CLICK":
                 switch ($object->EventKey)
                 {
                     case "weather":
-						$contentStr=$this->forecast();
+						$contentStr = $this->forecast();
                         break;
                     case "underground":
                         $contentStr[] = array("Title" =>"广州市地铁线路图", 
                         "Description" =>"点击查看大图", 
-                        "PicUrl" =>"http://378711563-picture.stor.sinaapp.com/underground.jpg", 
-                        "Url" =>"http://378711563-picture.stor.sinaapp.com/underground.jpg");
+                        "PicUrl" =>"http://o6uv51311.bkt.clouddn.com/image/underground.jpg", 
+                        "Url" =>"http://o6uv51311.bkt.clouddn.com/image/underground.jpg");
                         break;
 					case "timetable":
 						$contentStr[] = array("Title" =>"信工四班课表", 
                         "Description" =>"点击查看大图", 
-                        "PicUrl" =>"http://378711563-picture.stor.sinaapp.com/timetable.png", 
-                        "Url" =>"http://378711563-picture.stor.sinaapp.com/timetable.png");
+                        "PicUrl" =>"http://o6uv51311.bkt.clouddn.com/image/timetable.png", 
+                        "Url" =>"http://o6uv51311.bkt.clouddn.com/image/timetable.png");
 						break;
-					case "homework":
-						$contentStr = "暂无作业";
+					case "wall":
+						$contentStr = "欢迎进入微信墙功能,请回复您所要使用的昵称。";
+						$type="wall";
 						break;
 					case 'nba':
 						$contentStr = $this->nba();
@@ -147,39 +321,29 @@ class wechatCallbackapiTest
 						break;
 					case "music":
 						$contentStr = array("Title" => "last of us",
-						"Description" => "游戏美国末日的插曲",
-						"MusicUrl" => "http://378711563-music.stor.sinaapp.com/music.mp3",
-						"HQMusicUrl" => "http://378711563-music.stor.sinaapp.com/music.mp3");						
+						"Description" => "游戏 美国末日(又名最后生还者) 插曲",
+						"MusicUrl" => "http://o6uv51311.bkt.clouddn.com/music/music.mp3",
+						"HQMusicUrl" => "http://o6uv51311.bkt.clouddn.com/music/music.mp3");						
 						$type="music";				
 						break;
 					case "drama":
-						$contentStr[] = array("Title" =>"电视剧红色 良心国产", 
-                        "Description" =>"豆瓣高分9.3，福尔摩斯般的探案，花样年华般的爱情,(点击跳转B站链接)", 
-                        "PicUrl" =>"http://378711563-picture.stor.sinaapp.com/drama.jpg", 
-                        "Url" =>"http://www.bilibili.com/video/av1594747/");
+						$contentStr[] = array("Title" =>"BBC电视剧 神探夏洛克", 
+                        "Description" =>"大英腐国三集片 主演：Benedict Cumberbatch & Martin Freeman (点击跳转B站链接)", 
+                        "PicUrl" =>"http://o6uv51311.bkt.clouddn.com/image/drama.jpg", 
+                        "Url" =>"http://www.bilibili.com/video/av722138/");
                         break;
 					case "advice":
-						$contentStr = "施工中。。。";//您将进行意见反馈，请输入您的意见！若不进行反馈，输入000退出。
+						$contentStr = "您将进行意见反馈，请输入您的意见！若不进行反馈，输入0退出。";
 						$type="advice";
 						break;
 					case "contact":
-						$contentStr = "QQ:378711563 e-mail:378711563@qq.com 任何问题，欢迎叨唠！";
+						$contentStr = "QQ:378711563 e-mail:378711563@qq.com 任何问题，欢迎叨扰！";
 						break;
-					default:
-                        $contentStr[] = array("Title" =>"默认菜单回复", 
-                        "Description" =>"贴心小助手", 
-                        "PicUrl" =>"http://discuz.comli.com/weixin/weather/icon/cartoon.jpg", 
-                        "Url" =>"weixin://addfriend/pondbaystudio");
-                        break;
                 }
                 break;
-            default:
-				$this->step();
-                break;      
-
         }
         if (is_array($contentStr)){
-			if($type=="music")
+			if($type == "music")
 			{
 				$resultStr = $this->transmitMusic($object,$contentStr);
 			}else
@@ -187,25 +351,29 @@ class wechatCallbackapiTest
 				$resultStr = $this->transmitNews($object, $contentStr);
 			}          
         }else{
-			if($type=="advice")
+			if($type == "advice")
 			{
-				$this->step();
+				$this->saveStep($object->FromUserName,'adv');
 				$resultStr = $this->transmitText($object, $contentStr);				
 			}else
 			{
-				$resultStr = $this->transmitText($object, $contentStr);
+				if($type == "wall")
+				{					
+					$this->saveStep($object->FromUserName,'wall');
+					$this->createwall($object->FromUserName);
+					$resultStr = $this->transmitText($object, $contentStr);	
+				}else
+				{
+					$resultStr = $this->transmitText($object, $contentStr);
+				}
+				
 			}
+			
             
         }
         return $resultStr;
     }
 
-	public function step()
-	{
-		global $step;
-		$step=1;
-	}
-	
     public function transmitText($object, $content, $funcFlag = 0)
     {
         $textTpl = "<xml>
@@ -303,102 +471,102 @@ class wechatCallbackapiTest
 		return preg_replace($pattern, $replace, $string);  
 		}
 
-		$url="http://www.weather.com.cn/weather/101280101.shtml";
-		$page_content=file_get_contents($url); 
-		$page_content=compress_html($page_content);
+		$url = "http://www.weather.com.cn/weather/101280101.shtml";
+		$page_content = file_get_contents($url); 
+		$page_content = compress_html($page_content);
 		preg_match("/\"t clearfix\"(.*?)后天/",$page_content,$result);
 		preg_match("/\"hidden_title\"(.*?>)/",$page_content,$today);
 		preg_match("/明天(.*?)slid/",$result[1],$tomo);
 		preg_match("/后天(.*?)slid/",$page_content,$tdat);
 
 		/*今天*/
-		$a=explode(" ",$today[1]);
+		$a = explode(" ",$today[1]);
 
 		//气候
-		$weather=$a[2];
+		$weather = $a[2];
 		//最高温度
-		$b=explode("/",$a[3]);
-		$c=explode("°C",$b[1]);	
-		$max_tem=$c[0];
+		$b = explode("/",$a[3]);
+		$c = explode("°C",$b[1]);	
+		$max_tem = $c[0];
 		//最低温度
-		$min_tem=$b[0];
+		$min_tem = $b[0];
 		
 
 		/*明天*/
 
-		$a1=explode("<",$tomo[1]);
+		$a1 = explode("<",$tomo[1]);
 		//气候
-		$b1=explode(">",$a1[6]);
+		$b1 = explode(">",$a1[6]);
 		$weather1=$b1[1];
 		//最高温度
-		$d1=explode(">",$a1[9]);
-		$max_tem1=$d1[1];
+		$d1 = explode(">",$a1[9]);
+		$max_tem1 = $d1[1];
 		//最低温度
-		$e1=explode(">",$a1[11]);
-		$min_tem1=$e1[1];
+		$e1 = explode(">",$a1[11]);
+		$min_tem1 = $e1[1];
 		//风速
-		$f1=explode(">",$a1[21]);
-		$wind1=$f1[1];
+		$f1 = explode(">",$a1[21]);
+		$wind1 = $f1[1];
 
 
 		/*后天*/
-		$a2=explode("<",$tdat[1]);
+		$a2 = explode("<",$tdat[1]);
 		//气候
-		$b2=explode(">",$a2[6]);
-		$weather2=$b2[1];
+		$b2 = explode(">",$a2[6]);
+		$weather2 = $b2[1];
 		//最高温度
-		$d2=explode(">",$a2[9]);
-		$max_tem2=$d2[1];
+		$d2 = explode(">",$a2[9]);
+		$max_tem2 = $d2[1];
 		//最低温度
-		$e2=explode(">",$a2[11]);
-		$min_tem2=$e2[1];
+		$e2 = explode(">",$a2[11]);
+		$min_tem2 = $e2[1];
 		//风速
-		$f2=explode(">",$a2[21]);
-		$wind2=$f2[1];
+		$f2 = explode(">",$a2[21]);
+		$wind2 = $f2[1];
 		
-		if($weather=="晴"){$picurl="http://378711563-picture.stor.sinaapp.com/qing.jpg";}else
-		if($weather=="多云"){$picurl="http://378711563-picture.stor.sinaapp.com/duoyun.jpg";}else
-		if($weather=="阴"){$picurl="http://378711563-picture.stor.sinaapp.com/yin.jpg";}else
-		if($weather=="暴风"||$weather=="台风"){$picurl="http://378711563-picture.stor.sinaapp.com/baofentaifen.jpg";}else
-		if($weather=="暴雨"){$picurl="http://378711563-picture.stor.sinaapp.com/baoyu.jpg";}else
-		if($weather=="冰雹"){$picurl="http://378711563-picture.stor.sinaapp.com/bingbao.jpg";}else
-		if($weather=="雷阵雨"){$picurl="http://378711563-picture.stor.sinaapp.com/leizhenyu.jpg";}else
-		if($weather=="雾"||$weather=="霾"){$picurl="http://378711563-picture.stor.sinaapp.com/wumai.jpg";}else
-		if($weather=="小雪"||$weather=="中雪"||$weather=="大雪"){$picurl="http://378711563-picture.stor.sinaapp.com/xiaoxuedaxuezhongxue.jpg";}else
-		if($weather=="雨夹雪"){$picurl="http://378711563-picture.stor.sinaapp.com/yujiaxue.jpg";}else
-		if($weather=="小雨"||$weather=="中雨"||$weather=="大雨"||$weather=="阵雨"){$picurl="http://378711563-picture.stor.sinaapp.com/xiaoyuzhongyudayuzhenyu.jpg";}
+		if($weather == "晴"){$picurl="http://o6uv51311.bkt.clouddn.com/image/qing.jpg";}else
+		if($weather == "多云"){$picurl="http://o6uv51311.bkt.clouddn.com/image/duoyun.jpg";}else
+		if($weather == "阴"){$picurl="http://o6uv51311.bkt.clouddn.com/image/yin.jpg";}else
+		if($weather == "暴风"||$weather=="台风"){$picurl="http://o6uv51311.bkt.clouddn.com/image/baofentaifen.jpg";}else
+		if($weather == "暴雨"){$picurl="http://o6uv51311.bkt.clouddn.com/image/baoyu.jpg";}else
+		if($weather == "冰雹"){$picurl="http://o6uv51311.bkt.clouddn.com/image/bingbao.jpg";}else
+		if($weather == "雷阵雨"){$picurl="http://o6uv51311.bkt.clouddn.com/image/leizhenyu.jpg";}else
+		if($weather == "雾"||$weather=="霾"){$picurl="http://o6uv51311.bkt.clouddn.com/image/wumai.jpg";}else
+		if($weather == "小雪"||$weather=="中雪"||$weather=="大雪"){$picurl="http://o6uv51311.bkt.clouddn.com/image/xiaoxuedaxuezhongxue.jpg";}else
+		if($weather == "雨夹雪"){$picurl="http://o6uv51311.bkt.clouddn.com/image/yujiaxue.jpg";}else
+		if($weather == "小雨"||$weather=="中雨"||$weather=="大雨"||$weather=="阵雨"){$picurl="http://o6uv51311.bkt.clouddn.com/image/xiaoyuzhongyudayuzhenyu.jpg";}
 		
-		if($weather1=="晴"){$picurl1="http://378711563-picture.stor.sinaapp.com/qing.jpg";}else
-		if($weather1=="多云"){$picurl1="http://378711563-picture.stor.sinaapp.com/duoyun.jpg";}else
-		if($weather1=="阴"){$picurl1="http://378711563-picture.stor.sinaapp.com/yin.jpg";}else
-		if($weather1=="暴风"||$weather=="台风"){$picurl1="http://378711563-picture.stor.sinaapp.com/baofentaifen.jpg";}else
-		if($weather1=="暴雨"){$picurl1="http://378711563-picture.stor.sinaapp.com/baoyu.jpg";}else
-		if($weather1=="冰雹"){$picurl1="http://378711563-picture.stor.sinaapp.com/bingbao.jpg";}else
-		if($weather1=="雷阵雨"){$picurl1="http://378711563-picture.stor.sinaapp.com/leizhenyu.jpg";}else
-		if($weather1=="雾"||$weather1=="霾"){$picurl1="http://378711563-picture.stor.sinaapp.com/wumai.jpg";}else
-		if($weather1=="小雪"||$weather1=="中雪"||$weather1=="大雪"){$picurl1="http://378711563-picture.stor.sinaapp.com/xiaoxuedaxuezhongxue.jpg";}else
-		if($weather1=="雨夹雪"){$picurl="http://378711563-picture.stor.sinaapp.com/yujiaxue.jpg";}else
-		if($weather1=="小雨"||$weather1=="中雨"||$weather1=="大雨"||$weather1=="阵雨"){$picurl1="http://378711563-picture.stor.sinaapp.com/xiaoyuzhongyudayuzhenyu.jpg";}
+		if($weather1 == "晴"){$picurl1="http://o6uv51311.bkt.clouddn.com/image/qing.jpg";}else
+		if($weather1 == "多云"){$picurl1="http://o6uv51311.bkt.clouddn.com/image/duoyun.jpg";}else
+		if($weather1 == "阴"){$picurl1="http://o6uv51311.bkt.clouddn.com/image/yin.jpg";}else
+		if($weather1 == "暴风"||$weather=="台风"){$picurl1="http://o6uv51311.bkt.clouddn.com/image/baofentaifen.jpg";}else
+		if($weather1 == "暴雨"){$picurl1="http://o6uv51311.bkt.clouddn.com/image/baoyu.jpg";}else
+		if($weather1 == "冰雹"){$picurl1="http://o6uv51311.bkt.clouddn.com/image/bingbao.jpg";}else
+		if($weather1 == "雷阵雨"){$picurl1="http://o6uv51311.bkt.clouddn.com/image/leizhenyu.jpg";}else
+		if($weather1 == "雾"||$weather1=="霾"){$picurl1="http://o6uv51311.bkt.clouddn.com/image/wumai.jpg";}else
+		if($weather1 == "小雪"||$weather1=="中雪"||$weather1=="大雪"){$picurl1="http://o6uv51311.bkt.clouddn.com/image/xiaoxuedaxuezhongxue.jpg";}else
+		if($weather1 == "雨夹雪"){$picurl="http://o6uv51311.bkt.clouddn.com/image/yujiaxue.jpg";}else
+		if($weather1 == "小雨"||$weather1=="中雨"||$weather1=="大雨"||$weather1=="阵雨"){$picurl1="http://o6uv51311.bkt.clouddn.com/image/xiaoyuzhongyudayuzhenyu.jpg";}
 		
-		if($weather2=="晴"){$picurl2="http://378711563-picture.stor.sinaapp.com/qing.jpg";}else
-		if($weather2=="多云"){$picurl2="http://378711563-picture.stor.sinaapp.com/duoyun.jpg";}else
-		if($weather2=="阴"){$picurl2="http://378711563-picture.stor.sinaapp.com/yin.jpg";}else
-		if($weather2=="暴风"||$weather2=="台风"){$picurl2="http://378711563-picture.stor.sinaapp.com/baofentaifen.jpg";}else
-		if($weather2=="暴雨"){$picurl2="http://378711563-picture.stor.sinaapp.com/baoyu.jpg";}else
-		if($weather2=="冰雹"){$picurl2="http://378711563-picture.stor.sinaapp.com/bingbao.jpg";}else
-		if($weather2=="雷阵雨"){$picurl2="http://378711563-picture.stor.sinaapp.com/leizhenyu.jpg";}else
-		if($weather2=="雾"||$weather2=="霾"){$picurl2="http://378711563-picture.stor.sinaapp.com/wumai.jpg";}else
-		if($weather2=="小雪"||$weather2=="中雪"||$weather2=="大雪"){$picurl2="http://378711563-picture.stor.sinaapp.com/xiaoxuedaxuezhongxue.jpg";}else
-		if($weather2=="雨夹雪"){$picurl2="http://378711563-picture.stor.sinaapp.com/yujiaxue.jpg";}else
-		if($weather2=="小雨"||$weather2=="中雨"||$weather2=="大雨"||$weather2=="阵雨"){$picurl2="http://378711563-picture.stor.sinaapp.com/xiaoyuzhongyudayuzhenyu.jpg";}
+		if($weather2 == "晴"){$picurl2="http://o6uv51311.bkt.clouddn.com/image/qing.jpg";}else
+		if($weather2 == "多云"){$picurl2="http://o6uv51311.bkt.clouddn.com/image/duoyun.jpg";}else
+		if($weather2 == "阴"){$picurl2="http://o6uv51311.bkt.clouddn.com/image/yin.jpg";}else
+		if($weather2 == "暴风"||$weather2=="台风"){$picurl2="http://o6uv51311.bkt.clouddn.com/image/baofentaifen.jpg";}else
+		if($weather2 == "暴雨"){$picurl2="http://o6uv51311.bkt.clouddn.com/image/baoyu.jpg";}else
+		if($weather2 == "冰雹"){$picurl2="http://o6uv51311.bkt.clouddn.com/image/bingbao.jpg";}else
+		if($weather2 == "雷阵雨"){$picurl2="http://o6uv51311.bkt.clouddn.com/image/leizhenyu.jpg";}else
+		if($weather2 == "雾"||$weather2=="霾"){$picurl2="http://o6uv51311.bkt.clouddn.com/image/wumai.jpg";}else
+		if($weather2 == "小雪"||$weather2=="中雪"||$weather2=="大雪"){$picurl2="http://o6uv51311.bkt.clouddn.com/image/xiaoxuedaxuezhongxue.jpg";}else
+		if($weather2 == "雨夹雪"){$picurl2="http://o6uv51311.bkt.clouddn.com/image/yujiaxue.jpg";}else
+		if($weather2 == "小雨"||$weather2=="中雨"||$weather2=="大雨"||$weather2=="阵雨"){$picurl2="http://o6uv51311.bkt.clouddn.com/image/xiaoyuzhongyudayuzhenyu.jpg";}
 		
 		
-		$con[]=array("Title" =>"广州天气预报");
-		$con[]=array("Title" =>"今天 天气:".$weather." 温度:".$max_tem."-".$min_tem."℃",
+		$con[] = array("Title" =>"广州天气预报");
+		$con[] = array("Title" =>"今天 天气:".$weather." 温度:".$max_tem."-".$min_tem."℃",
 		"PicUrl" =>$picurl);
-		$con[]=array("Title" =>"明天 天气:".$weather1." 温度:".$max_tem1."-".$min_tem1." 风速:".$wind1,
+		$con[] = array("Title" =>"明天 天气:".$weather1." 温度:".$max_tem1."-".$min_tem1." 风速:".$wind1,
 		"PicUrl" =>$picurl1);
-		$con[]=array("Title" =>"后天 天气:".$weather2." 温度:".$max_tem2."-".$min_tem2." 风速:".$wind2,
+		$con[] = array("Title" =>"后天 天气:".$weather2." 温度:".$max_tem2."-".$min_tem2." 风速:".$wind2,
 		"PicUrl" =>$picurl2);             
 
 		return $con;
@@ -431,63 +599,93 @@ class wechatCallbackapiTest
 		return preg_replace($pattern, $replace, $string);  
 		}
 		
-		$d=intval(date('W',strtotime(date("Y-m-d"))));//计算今日是本年的第几周
-		$url="http://nba.sports.163.com/schedule/2016-{$d}.html";//注意：url里的2016-8随周次而变化
-		$page_content=file_get_contents($url); 
-		$page_content=compress_html($page_content);
+		$d = intval(date('W',strtotime(date("Y-m-d"))));//计算今日是本年的第几周
+		$url = "http://nba.sports.163.com/schedule/2016-{$d}.html";//注意：url里的2016-{$d}随周次而变化
+		$page_content = file_get_contents($url); 
+		$page_content = compress_html($page_content);
 		preg_match("/\"in-con2 clearfix\"(.*?)\"blank20\"/",$page_content,$result);	
 		$day=explode("blank6",$result[1]);		
 		
-		for($i=1;$i<=7;$i++)
+		for($i = 1;$i <= 7;$i++)
 		{
 			//日期
-			$k=2*$i-1;
-			$date=explode(">",$day[$k]);			
-			$date=explode("<",$date[3]);
+			$k = 2*$i-1;
+			@$date = explode(">",$day[$k]);			
+			@$date = explode("<",$date[3]);
 			
-			$date=$date[0];	
+			$date = $date[0];	
 			
-			$one=explode("nolbo",$day[2*$i]);
+			@$one = explode("nolbo",$day[2*$i]);
 			
-			$max=count($one);
+			$max = count($one);
 			
-			$now=date("Y年m月d日");
-			$week=date("w");		
-			if($week==0){$week="日";}else
-			if($week==1){$week="一";}else
-			if($week==2){$week="二";}else
-			if($week==3){$week="三";}else
-			if($week==4){$week="四";}else
-			if($week==5){$week="五";}else
-			if($week==6){$week="六";}
-			$now=$now." 星期".$week;
+			$now = date("Y年m月d日");
+			$week = date("w");		
+			if($week == 0){$week = "Sun";}else
+			if($week == 1){$week = "Mon";}else
+			if($week == 2){$week = "Tue";}else
+			if($week == 3){$week = "Wed";}else
+			if($week == 4){$week = "Thu";}else
+			if($week == 5){$week = "Fri";}else
+			if($week == 6){$week = "Sat";}
+			$now = $now." ".$week;
 
-			
-			for($j=1;$j<=$max-1;$j++)
-			{													
-				$con=explode("<",$one[$j]);
-				
-				//开球时间		
-				$time=explode(">",$con[0]);
-				$time=$time[1];
+			if($max <= 10)
+			{
+				for($j = 1;$j <= $max-1;$j++)
+				{													
+					$con = explode("<",$one[$j]);
+					
+					//开球时间		
+					$time = explode(">",$con[0]);
+					$time = $time[1];
 
-				//客场球队
-				$team1=explode(">",$con[4]);	
-				$team1=$team1[1];
+					//客场球队
+					$team1 = explode(">",$con[4]);	
+					$team1 = $team1[1];
 
-				//比分(对于未完成的比赛，比分暂用VS表示)
-				$score=explode(">",$con[7]);	
-				$score=$score[1];
+					//比分(对于未完成的比赛，比分暂用VS表示)
+					$score = explode(">",$con[7]);	
+					$score = $score[1];
 
-				//主场球队
-				$team2=explode(">",$con[12]);	
-				$team2=$team2[1];
+					//主场球队
+					$team2 = explode(">",$con[12]);	
+					$team2 = $team2[1];
 
-				if($now==$date)
-				{
-					$res[0]=array("Title" => $now."赛程");
-					$res[$j]=array("Title" => $time."  客场: ".$team1.$score."主场: ".$team2);
-				}							
+					if($now == $date)
+					{
+						$res[0] = array("Title" => $now."赛程");
+						$res[$j] = array("Title" => $time."  客场: ".$team1.$score."主场: ".$team2);
+					}							
+				}
+			}else
+			{
+				for($j = 1;$j <= 9;$j++)
+				{													
+					$con = explode("<",$one[$j]);
+					
+					//开球时间		
+					$time = explode(">",$con[0]);
+					$time = $time[1];
+
+					//客场球队
+					$team1 = explode(">",$con[4]);	
+					$team1 = $team1[1];
+
+					//比分(对于未完成的比赛，比分暂用VS表示)
+					$score = explode(">",$con[7]);	
+					$score = $score[1];
+
+					//主场球队
+					$team2 = explode(">",$con[12]);	
+					$team2 = $team2[1];
+
+					if($now == $date)
+					{
+						$res[0] = array("Title" => $now."赛程(当天赛程超过十场，省略部分赛程)");
+						$res[$j] = array("Title" => $time."  客场: ".$team1.$score."主场: ".$team2);
+					}							
+				}
 			}
 		}
 		
@@ -496,7 +694,8 @@ class wechatCallbackapiTest
 	
 	public function nba_tom()
 	{
-		function compress_html($string) {  
+		function compress_html($string) 
+		{  
 			$string = str_replace("\r\n", '', $string);   
 			$string = str_replace("\n", '', $string);   
 			$string = str_replace("\t", '', $string);  
@@ -519,63 +718,94 @@ class wechatCallbackapiTest
 
 		return preg_replace($pattern, $replace, $string);  
 		}
-		$d=intval(date('W',strtotime(date("Y-m-d",strtotime("+1 day")))));//计算明日是本年的第几周
-		$url="http://nba.sports.163.com/schedule/2016-{$d}.html";//注意：url里的2016-8随周次而变化，记得随时刷新
-		$page_content=file_get_contents($url); 
-		$page_content=compress_html($page_content);
+		$d = intval(date('W',strtotime(date("Y-m-d",strtotime("+1 day")))));//计算明日是本年的第几周
+		$url = "http://nba.sports.163.com/schedule/2016-{$d}.html";//注意：url里的2016-8随周次而变化，记得随时刷新
+		$page_content = file_get_contents($url); 
+		$page_content = compress_html($page_content);
 		preg_match("/\"in-con2 clearfix\"(.*?)\"blank20\"/",$page_content,$result);	
-		$day=explode("blank6",$result[1]);		
+		$day = explode("blank6",$result[1]);		
 		
-		for($i=1;$i<=7;$i++)
+		for($i = 1;$i <= 7;$i++)
 		{
 			//日期
-			$k=2*$i-1;
-			$date=explode(">",$day[$k]);			
-			$date=explode("<",$date[3]);
+			$k = 2*$i-1;
+			@$date = explode(">",$day[$k]);			
+			@$date = explode("<",$date[3]);
 			
-			$date=$date[0];	
+			$date = $date[0];	
 			
-			$one=explode("nolbo",$day[2*$i]);
+			@$one = explode("nolbo",$day[2*$i]);
 			
-			$max=count($one);
+			$max = count($one);
 			
-			$tom=date("Y年m月d日",strtotime("+1 day"));
+			$tom = date("Y年m月d日",strtotime("+1 day"));
 			
-			$week=date("w");		
-			if($week==0){$week="一";}else
-			if($week==1){$week="二";}else
-			if($week==2){$week="三";}else
-			if($week==3){$week="四";}else
-			if($week==4){$week="五";}else
-			if($week==5){$week="六";}else
-			if($week==6){$week="日";}
-			$tom=$tom." 星期".$week;
+			$week = date("w");		
+			if($week == 0){$week = "Mon";}else
+			if($week == 1){$week = "Tue";}else
+			if($week == 2){$week = "Wed";}else
+			if($week == 3){$week = "Thu";}else
+			if($week == 4){$week = "Fri";}else
+			if($week == 5){$week = "Sat";}else
+			if($week == 6){$week = "Sun";}
+			$tom = $tom." ".$week;
 			
-			for($j=1;$j<=$max-1;$j++)
-			{													
-				$con=explode("<",$one[$j]);
-				
-				//开球时间		
-				$time=explode(">",$con[0]);
-				$time=$time[1];
+			if($max <= 10)
+			{
+				for($j = 1;$j <= $max-1;$j++)
+				{													
+					$con = explode("<",$one[$j]);
+					
+					//开球时间		
+					$time = explode(">",$con[0]);
+					$time = $time[1];
 
-				//客场球队
-				$team1=explode(">",$con[4]);	
-				$team1=$team1[1];
+					//客场球队
+					$team1 = explode(">",$con[4]);	
+					$team1 = $team1[1];
 
-				//比分(对于未完成的比赛，比分暂用VS表示)
-				$score=explode(">",$con[7]);	
-				$score=$score[1];
+					//比分(对于未完成的比赛，比分暂用VS表示)
+					$score = explode(">",$con[7]);	
+					$score = $score[1];
 
-				//主场球队
-				$team2=explode(">",$con[12]);	
-				$team2=$team2[1];
+					//主场球队
+					$team2 = explode(">",$con[12]);	
+					$team2 = $team2[1];
 
-				if($tom==$date)
-				{
-					$res[0]=array("Title" => $tom."赛程");
-					$res[$j]=array("Title" => $time." 客场 ".$team1.$score." 主场 ".$team2);
-				}							
+					if($tom == $date)
+					{
+						$res[0] = array("Title" => $tom."赛程");
+						$res[$j] = array("Title" => $time." 客场 ".$team1.$score." 主场 ".$team2);
+					}							
+				}
+			}else
+			{
+				for($j = 1;$j <= 9;$j++)
+				{													
+					$con = explode("<",$one[$j]);
+					
+					//开球时间		
+					$time = explode(">",$con[0]);
+					$time = $time[1];
+
+					//客场球队
+					$team1 = explode(">",$con[4]);	
+					$team1 = $team1[1];
+
+					//比分(对于未完成的比赛，比分暂用VS表示)
+					$score = explode(">",$con[7]);	
+					$score = $score[1];
+
+					//主场球队
+					$team2 = explode(">",$con[12]);	
+					$team2 = $team2[1];
+
+					if($tom == $date)
+					{
+						$res[0] = array("Title" => $tom."赛程(当天赛程超过十场，省略部分赛程)");
+						$res[$j] = array("Title" => $time." 客场 ".$team1.$score." 主场 ".$team2);
+					}							
+				}
 			}
 		}
 
