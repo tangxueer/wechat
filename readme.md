@@ -1,0 +1,1 @@
+微信墙前端界面地址：http://1.378711563.applinzi.com/wall.php
